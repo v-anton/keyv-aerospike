@@ -1,0 +1,51 @@
+{
+	"name": "@keyv/aerospike",
+	"version": "1.0.0",
+	"description": "Aerospike storage adapter for Keyv",
+	"type": "module",
+	"license": "MIT",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+			"require": {
+				"types": "./dist/index.d.cts",
+				"default": "./dist/index.cjs"
+			}
+		},
+		"./package.json": "./package.json"
+	},
+	"files": ["dist"],
+	"engines": { "node": ">=18" },
+	"scripts": {
+		"build": "tsdown",
+		"dev": "tsdown --watch",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:services:start": "docker compose up -d aerospike",
+		"test:services:stop": "docker compose down",
+		"test:docker": "docker compose run --rm test"
+	},
+	"dependencies": {
+		"hookified": "^3.0.1"
+	},
+	"peerDependencies": {
+		"aerospike": "^5.0.0 || ^6.0.0",
+		"keyv": "^5.0.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@keyv/test-suite": "^2.1.2",
+		"@types/node": "^22.15.17",
+		"aerospike": "^6.7.1",
+		"keyv": "^5.6.0",
+		"tsdown": "^0.11.9",
+		"typescript": "^5.8.3",
+		"vitest": "^3.1.3"
+	}
+}

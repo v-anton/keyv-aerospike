@@ -1,0 +1,30 @@
+services:
+  aerospike:
+    image: aerospike/aerospike-server
+    container_name: keyv-aerospike-test
+    ports:
+      - "3000-3002:3000-3002"
+    volumes:
+      - ./aerospike.conf:/opt/aerospike/etc/aerospike.conf:ro
+    command: ["--config-file", "/opt/aerospike/etc/aerospike.conf"]
+    healthcheck:
+      test: ["CMD", "asinfo", "-v", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  test:
+    image: node:24-bookworm
+    working_dir: /app
+    depends_on:
+      aerospike:
+        condition: service_healthy
+    environment:
+      AEROSPIKE_HOST: aerospike
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    command: ["sh", "-lc", "npm ci && npm run build && npm run lint && npm run typecheck && npm test"]
+
+volumes:
+  node_modules:
