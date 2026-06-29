@@ -190,4 +190,21 @@ describe("createKeyv", () => {
 		expect(await keyv.get("hello")).toBe("world");
 		await keyv.disconnect();
 	});
+
+	it("supports keyv-level iteration (keyv.iterator())", async () => {
+		const keyv = createKeyv({ hosts: aerospikeHosts }, { namespace: "ckiter" });
+		keyv.on("error", () => {});
+		await keyv.clear();
+		await keyv.set("a", "1");
+		await keyv.set("b", "2");
+
+		const seen: Record<string, unknown> = {};
+		for await (const [key, value] of keyv.iterator()) {
+			seen[key] = value;
+		}
+		expect(seen).toEqual({ a: "1", b: "2" });
+
+		await keyv.clear();
+		await keyv.disconnect();
+	});
 });

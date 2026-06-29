@@ -102,9 +102,21 @@ store.on('error', (err) => console.error(err));
 
 ## Iteration
 
-`store.iterator(namespace?)` works directly and yields `[key, value]` pairs filtered to the given namespace. This is tested directly in the adapter's test suite.
+`store.iterator(namespace?)` works directly and yields `[key, value]` pairs filtered to the given namespace.
 
-`keyv.iterator()` — iterating via the Keyv instance — requires keyv core to include `"aerospike"` in its internal `iterableAdapters` list. That inclusion is pending upstream; until it lands, use `store.iterator()` directly.
+To iterate the **Keyv instance** (`keyv.iterator()` or `for await (const [key, value] of keyv)`), create it with `createKeyv()`:
+
+```js
+import { createKeyv } from 'keyv-aerospike';
+
+const keyv = createKeyv('aerospike://localhost:3000', { namespace: 'app' });
+await keyv.set('a', 1);
+for await (const [key, value] of keyv.iterator()) {
+  console.log(key, value);
+}
+```
+
+`createKeyv()` wires iteration explicitly. Note: keyv core only auto-wires `keyv.iterator()` for adapters in its built-in `iterableAdapters` allowlist (which omits `aerospike`), so a manually-constructed `new Keyv(new KeyvAerospike(...))` does **not** support `keyv.iterator()` — use `createKeyv()` or call `store.iterator()` directly.
 
 ## Running tests
 

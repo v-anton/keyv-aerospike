@@ -1,9 +1,29 @@
 {
-	"name": "@keyv/aerospike",
+	"name": "keyv-aerospike",
 	"version": "1.0.0",
 	"description": "Aerospike storage adapter for Keyv",
 	"type": "module",
 	"license": "MIT",
+	"author": "Anton Vozghrin <anton.vozgrin@gmail.com>",
+	"homepage": "https://github.com/v-anton/keyv-aerospike#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/v-anton/keyv-aerospike.git"
+	},
+	"bugs": {
+		"url": "https://github.com/v-anton/keyv-aerospike/issues"
+	},
+	"keywords": [
+		"keyv",
+		"aerospike",
+		"storage",
+		"adapter",
+		"key-value",
+		"cache",
+		"database",
+		"ttl"
+	],
+	"sideEffects": false,
 	"main": "./dist/index.cjs",
 	"module": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -21,6 +41,7 @@
 	"engines": { "node": ">=18" },
 	"scripts": {
 		"build": "tsdown",
+		"prepublishOnly": "npm run build",
 		"dev": "tsdown --watch",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
