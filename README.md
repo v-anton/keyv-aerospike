@@ -1,14 +1,16 @@
-# @keyv/aerospike
+# keyv-aerospike
 
-> Aerospike storage adapter for [Keyv](https://github.com/jaredwray/keyv) — v1 / keyv-v5 line.
+> Aerospike storage adapter for [Keyv](https://github.com/jaredwray/keyv) — v2 / keyv v6.
 
-[![npm version](https://img.shields.io/npm/v/@keyv/aerospike)](https://www.npmjs.com/package/@keyv/aerospike)
+[![npm version](https://img.shields.io/npm/v/keyv-aerospike)](https://www.npmjs.com/package/keyv-aerospike)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
+**This is v2, targeting keyv `^6`.** If you are on keyv v5, use `keyv-aerospike@^1`.
 
 ## Install
 
 ```bash
-npm install @keyv/aerospike aerospike keyv
+npm install keyv@^6 keyv-aerospike@next aerospike
 ```
 
 `aerospike` and `keyv` are peer dependencies. The `aerospike` native addon requires Node 18+ and the system `libyaml` library (`brew install libyaml` on macOS, `apt install libyaml-dev` on Debian/Ubuntu).
@@ -19,7 +21,7 @@ npm install @keyv/aerospike aerospike keyv
 
 ```ts
 import Keyv from 'keyv';
-import { KeyvAerospike } from '@keyv/aerospike';
+import { KeyvAerospike } from 'keyv-aerospike';
 
 const keyv = new Keyv(new KeyvAerospike('aerospike://127.0.0.1:3000'));
 
@@ -46,7 +48,7 @@ new KeyvAerospike('aerospike://user:pass@10.0.0.1:3000,10.0.0.2:3000?namespace=m
 ### Config-object form
 
 ```ts
-import { KeyvAerospike } from '@keyv/aerospike';
+import { KeyvAerospike } from 'keyv-aerospike';
 
 const store = new KeyvAerospike({
   hosts: [{ addr: '127.0.0.1', port: 3000 }],
@@ -62,7 +64,7 @@ const store = new KeyvAerospike({
 `createKeyv` builds the `Keyv` instance in one call:
 
 ```ts
-import { createKeyv } from '@keyv/aerospike';
+import { createKeyv } from 'keyv-aerospike';
 
 const keyv = createKeyv(
   { hosts: [{ addr: '127.0.0.1', port: 3000 }] },
@@ -96,27 +98,44 @@ store.on('error', (err) => console.error(err));
 
 ## TTL behavior
 
-- TTLs are passed as seconds to Aerospike (`Math.ceil(ttl / 1000)`), minimum 1 s.
-- TTL `0` or no TTL stores the record with `NEVER_EXPIRE`.
-- Aerospike evicts expired records server-side; no application-side expiry is needed.
+Keyv v6 passes an absolute `expires` timestamp (milliseconds since epoch) to the adapter's `set` method. The adapter:
+
+- Stores the `expires` value in a dedicated Aerospike bin alongside the record.
+- Computes a relative TTL (`Math.ceil((expires - Date.now()) / 1000)`, minimum 1 s) and sets it as the Aerospike native record TTL so the server evicts the record automatically.
+- Enforces expiry on every read: if `expires <= Date.now()` the record is treated as missing and deleted lazily.
+
+From a user's perspective nothing changes — you still call `keyv.set(key, value, ttlMs)` as before; Keyv v6 converts the TTL to an absolute timestamp internally.
+
+Records stored without a TTL use `NEVER_EXPIRE`.
 
 ## Iteration
 
-`store.iterator(namespace?)` works directly and yields `[key, value]` pairs filtered to the given namespace.
+`keyv.iterator()` and `for await (const [key, value] of keyv)` work directly in keyv v6 — no special wiring is needed:
 
-To iterate the **Keyv instance** (`keyv.iterator()` or `for await (const [key, value] of keyv)`), create it with `createKeyv()`:
-
-```js
+```ts
 import { createKeyv } from 'keyv-aerospike';
 
 const keyv = createKeyv('aerospike://localhost:3000', { namespace: 'app' });
 await keyv.set('a', 1);
-for await (const [key, value] of keyv.iterator()) {
+await keyv.set('b', 2);
+
+for await (const [key, value] of keyv) {
   console.log(key, value);
 }
 ```
 
-`createKeyv()` wires iteration explicitly. Note: keyv core only auto-wires `keyv.iterator()` for adapters in its built-in `iterableAdapters` allowlist (which omits `aerospike`), so a manually-constructed `new Keyv(new KeyvAerospike(...))` does **not** support `keyv.iterator()` — use `createKeyv()` or call `store.iterator()` directly.
+`store.iterator(namespace?)` is also available directly on the `KeyvAerospike` instance and yields `[key, value]` pairs filtered to the given namespace, with expired records skipped.
+
+## Upgrading from v1 / compatibility
+
+| keyv version | keyv-aerospike version |
+|---|---|
+| keyv `^6` | `keyv-aerospike@^2` (this package) |
+| keyv `^5` | `keyv-aerospike@^1` |
+
+**Read compatibility:** v2 reads records written by v1 transparently. Both versions store keys in the same `namespace:key` format in Aerospike, so existing data is accessible without migration.
+
+**Write format:** v2 adds an `expires` bin to each record (absent in v1 records). The adapter handles v1 records gracefully — a missing `expires` bin means the record does not expire on read.
 
 ## Running tests
 
