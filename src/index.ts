@@ -1,12 +1,19 @@
 import Aerospike, {
 	AerospikeError,
+	type AerospikeBins,
 	type AerospikeRecord,
 	type Client,
 	type ConfigOptions,
 	type Key,
 } from "aerospike";
 import { Hookified } from "hookified";
-import type { KeyvStoreAdapter, StoredData } from "keyv";
+import {
+	type KeyvStorageAdapter,
+	type KeyvStorageCapability,
+	type KeyvStorageEntry,
+	type KeyvStorageGetResult,
+	keyvStorageCapability,
+} from "keyv";
 import { parseConnectionString } from "./utils.js";
 
 export type KeyvAerospikeOptions = {
@@ -21,12 +28,6 @@ export type KeyvAerospikeOptions = {
 	connectionTimeout?: number;
 };
 
-// Internal opts: KeyvAerospikeOptions + required fields consumed by Keyv internals
-type KeyvAerospikeInternalOpts = KeyvAerospikeOptions & {
-	dialect: string;
-	url: string;
-};
-
 function isClient(value: unknown): value is Client {
 	return (
 		typeof value === "object" &&
@@ -36,8 +37,8 @@ function isClient(value: unknown): value is Client {
 	);
 }
 
-export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
-	public opts: KeyvAerospikeInternalOpts;
+export class KeyvAerospike extends Hookified implements KeyvStorageAdapter {
+	public opts: KeyvAerospikeOptions;
 	public namespace?: string;
 
 	private _client: Client;
@@ -54,7 +55,6 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 	) {
 		super();
 
-		// Support combined first-arg: new KeyvAerospike({ hosts, namespace, ... })
 		let resolvedOptions = options;
 		if (connect && typeof connect === "object" && !isClient(connect)) {
 			const c = connect as ConfigOptions & KeyvAerospikeOptions;
@@ -77,11 +77,7 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 			resolvedOptions = { ...extracted, ...options };
 		}
 
-		this.opts = {
-			...resolvedOptions,
-			dialect: "aerospike",
-			url: "",
-		};
+		this.opts = resolvedOptions;
 		this.namespace = resolvedOptions.namespace;
 		this._asNamespace = resolvedOptions.aerospikeNamespace ?? "keyv";
 		this._set = resolvedOptions.set ?? "keyv";
@@ -118,12 +114,17 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 				} = connect as ConfigOptions & KeyvAerospikeOptions;
 				config = aerospikeConfig as ConfigOptions;
 			}
-			// Wire connectionTimeout to the Aerospike client's connTimeoutMs field
 			if (typeof resolvedOptions.connectionTimeout === "number") {
 				config.connTimeoutMs = resolvedOptions.connectionTimeout;
 			}
 			this._client = Aerospike.client(config);
 		}
+	}
+
+	// v6: declare the absolute-expires storage contract. Obliges this adapter
+	// to enforce expiry on read.
+	public get capabilities(): KeyvStorageCapability {
+		return keyvStorageCapability(this);
 	}
 
 	private createKey(key: string): Key {
@@ -144,6 +145,21 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 		}
 	}
 
+	private isExpired(record: AerospikeRecord): boolean {
+		const expires = record.bins.expires;
+		return typeof expires === "number" && expires <= Date.now();
+	}
+
+	private readValue<Value>(
+		record: AerospikeRecord,
+	): KeyvStorageGetResult<Value> {
+		return (
+			record.bins.value as unknown as
+				| { value: KeyvStorageGetResult<Value> }
+				| undefined
+		)?.value;
+	}
+
 	public async getClient(): Promise<Client> {
 		if (this._client.isConnected(false)) {
 			return this._client;
@@ -159,7 +175,6 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 		return this._client;
 	}
 
-	// Scans the set and returns all records matching the given predicate.
 	private async _scanAll(
 		match: (record: AerospikeRecord) => boolean,
 	): Promise<AerospikeRecord[]> {
@@ -177,13 +192,15 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 		});
 	}
 
-	public async get<Value>(key: string): Promise<StoredData<Value> | undefined> {
+	public async get<Value>(key: string): Promise<KeyvStorageGetResult<Value>> {
 		try {
 			const client = await this.getClient();
 			const record = await client.get(this.createKey(key));
-			return (
-				record.bins.value as unknown as { value: StoredData<Value> } | undefined
-			)?.value;
+			if (this.isExpired(record)) {
+				await this.delete(key);
+				return undefined;
+			}
+			return this.readValue<Value>(record);
 		} catch (error) {
 			if (this.isNotFound(error)) {
 				return undefined;
@@ -196,20 +213,48 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 	public async set(
 		key: string,
 		value: unknown,
-		ttl?: number,
+		expires?: number,
 	): Promise<boolean> {
 		try {
+			// Already-expired writes must not persist.
+			if (typeof expires === "number" && expires <= Date.now()) {
+				await this.delete(key);
+				return true;
+			}
 			const client = await this.getClient();
-			const bins = { value: { value }, key, namespace: this.namespace ?? "" };
-			const ttlSeconds =
-				typeof ttl === "number" && ttl > 0
-					? Math.max(1, Math.ceil(ttl / 1000))
-					: Aerospike.ttl.NEVER_EXPIRE;
-			await client.put(this.createKey(key), bins, { ttl: ttlSeconds });
+			const bins: Record<string, unknown> = {
+				value: { value },
+				key,
+				namespace: this.namespace ?? "",
+			};
+			let ttlSeconds = Aerospike.ttl.NEVER_EXPIRE;
+			if (typeof expires === "number") {
+				bins.expires = expires;
+				ttlSeconds = Math.max(1, Math.ceil((expires - Date.now()) / 1000));
+			}
+			await client.put(this.createKey(key), bins as AerospikeBins, {
+				ttl: ttlSeconds,
+			});
 			return true;
 		} catch (error) {
 			this.handleError(error);
 			return false;
+		}
+	}
+
+	public async setMany<Value>(
+		entries: KeyvStorageEntry<Value>[],
+	): Promise<boolean[]> {
+		if (entries.length === 0) {
+			return [];
+		}
+		try {
+			return await Promise.all(
+				entries.map((entry) => this.set(entry.key, entry.value, entry.expires)),
+			);
+		} catch (error) {
+			this.handleError(error);
+			return entries.map(() => false);
 		}
 	}
 
@@ -227,19 +272,37 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 		}
 	}
 
-	public async has(key: string): Promise<boolean> {
+	public async deleteMany(keys: string[]): Promise<boolean[]> {
+		if (keys.length === 0) {
+			return [];
+		}
 		try {
 			const client = await this.getClient();
-			return await client.exists(this.createKey(key));
+			const results = await client.batchRemove(
+				keys.map((key) => this.createKey(key)),
+			);
+			// Aerospike returns batch results in input order.
+			return keys.map(
+				(_, index) => results[index]?.status === Aerospike.status.OK,
+			);
 		} catch (error) {
 			this.handleError(error);
-			return false;
+			return keys.map(() => false);
 		}
+	}
+
+	public async has(key: string): Promise<boolean> {
+		return (await this.get(key)) !== undefined;
+	}
+
+	public async hasMany(keys: string[]): Promise<boolean[]> {
+		const values = await this.getMany(keys);
+		return values.map((value) => value !== undefined);
 	}
 
 	public async getMany<Value>(
 		keys: string[],
-	): Promise<Array<StoredData<Value> | undefined>> {
+	): Promise<Array<KeyvStorageGetResult<Value | undefined>>> {
 		if (keys.length === 0) {
 			return [];
 		}
@@ -250,17 +313,18 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 				readAllBins: true,
 			}));
 			const results = await client.batchRead(batch);
-			// Aerospike SDK returns batch results in input order — keys.map index aligns with results index
+			const now = Date.now();
+			// Aerospike returns batch results in input order.
 			return keys.map((_, index) => {
 				const result = results[index];
-				if (result?.status === Aerospike.status.OK) {
-					return (
-						result.record.bins.value as unknown as
-							| { value: StoredData<Value> }
-							| undefined
-					)?.value;
+				if (result?.status !== Aerospike.status.OK) {
+					return undefined;
 				}
-				return undefined;
+				const expires = result.record.bins.expires;
+				if (typeof expires === "number" && expires <= now) {
+					return undefined;
+				}
+				return this.readValue<Value>(result.record);
 			});
 		} catch (error) {
 			this.handleError(error);
@@ -268,71 +332,18 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 		}
 	}
 
-	public async hasMany(keys: string[]): Promise<boolean[]> {
-		if (keys.length === 0) {
-			return [];
-		}
-		try {
-			const client = await this.getClient();
-			const results = await client.batchExists(
-				keys.map((key) => this.createKey(key)),
-			);
-			// Aerospike SDK returns batch results in input order — keys.map index aligns with results index
-			return keys.map(
-				(_, index) => results[index]?.status === Aerospike.status.OK,
-			);
-		} catch (error) {
-			this.handleError(error);
-			return keys.map(() => false);
-		}
-	}
-
-	public async setMany(
-		entries: Array<{ key: string; value: unknown; ttl?: number }>,
-	): Promise<void> {
-		if (entries.length === 0) {
-			return;
-		}
-		try {
-			await Promise.all(
-				entries.map((entry) => this.set(entry.key, entry.value, entry.ttl)),
-			);
-		} catch (error) {
-			this.handleError(error);
-		}
-	}
-
-	public async deleteMany(keys: string[]): Promise<boolean> {
-		if (keys.length === 0) {
-			return true;
-		}
-		try {
-			const client = await this.getClient();
-			const results = await client.batchRemove(
-				keys.map((key) => this.createKey(key)),
-			);
-			return results.every((result) => result.status === Aerospike.status.OK);
-		} catch (error) {
-			this.handleError(error);
-			return false;
-		}
-	}
-
 	public async clear(): Promise<void> {
 		try {
 			const ns = this.namespace ?? "";
-
 			if (!this.namespace && this._noNamespaceAffectsAll) {
 				const client = await this.getClient();
 				await client.truncate(this._asNamespace, this._set, 0);
 				return;
 			}
-
 			const records = await this._scanAll(
 				(record) => (record.bins.namespace ?? "") === ns,
 			);
 			const keysToDelete = records.map((record) => record.key);
-
 			const client = await this.getClient();
 			for (let i = 0; i < keysToDelete.length; i += this._clearBatchSize) {
 				await client.batchRemove(
@@ -352,9 +363,11 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 			const records = await this._scanAll(
 				(record) => (record.bins.namespace ?? "") === ns,
 			);
-
+			const now = Date.now();
 			for (const record of records) {
 				if (typeof record.bins.key !== "string") continue;
+				const expires = record.bins.expires;
+				if (typeof expires === "number" && expires <= now) continue;
 				const value = (
 					record.bins.value as { value: Awaited<Value> } | null | undefined
 				)?.value;

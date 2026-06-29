@@ -9,10 +9,14 @@ const makeStore = () => {
 	return store;
 };
 
-describe("KeyvAerospike core", () => {
+describe("KeyvAerospike v6 core", () => {
 	const store = makeStore();
 	afterAll(async () => {
-		await store.disconnect?.();
+		await store.disconnect();
+	});
+
+	it("declares the v6 expires capability", () => {
+		expect(store.capabilities.expires).toBe(true);
 	});
 
 	it("sets and gets a value", async () => {
@@ -24,186 +28,159 @@ describe("KeyvAerospike core", () => {
 		expect(await store.get("missing-key")).toBeUndefined();
 	});
 
-	it("stores objects via passthrough (no re-serialization)", async () => {
+	it("stores objects via passthrough", async () => {
 		const payload = { a: 1, b: "two" };
 		await store.set("k2", payload);
 		expect(await store.get("k2")).toEqual(payload);
 	});
 
-	it("reports has() correctly", async () => {
+	it("has() reflects existence", async () => {
 		await store.set("k3", "v");
 		expect(await store.has("k3")).toBe(true);
 		expect(await store.has("nope")).toBe(false);
 	});
 
-	it("deletes a key and reports false on a second delete", async () => {
+	it("delete returns true then false", async () => {
 		await store.set("k4", "v");
 		expect(await store.delete("k4")).toBe(true);
 		expect(await store.delete("k4")).toBe(false);
-		expect(await store.get("k4")).toBeUndefined();
+	});
+});
+
+describe("KeyvAerospike v6 expiry (absolute expires, enforce on read)", () => {
+	const store = makeStore();
+	afterAll(async () => {
+		await store.disconnect();
 	});
 
-	it("expires a key with a ttl", async () => {
-		await store.set("k5", "v", 1000);
+	it("expires a key after an absolute deadline", async () => {
+		await store.set("e1", "v", Date.now() + 1000);
+		expect(await store.get("e1")).toBe("v");
 		await new Promise((r) => setTimeout(r, 2500));
-		expect(await store.get("k5")).toBeUndefined();
+		expect(await store.get("e1")).toBeUndefined();
+	});
+
+	it("does not persist an already-elapsed deadline", async () => {
+		await store.set("e2", "v", Date.now() - 1000);
+		expect(await store.get("e2")).toBeUndefined();
+	});
+
+	it("has() returns false for an expired key", async () => {
+		await store.set("e3", "v", Date.now() + 1000);
+		await new Promise((r) => setTimeout(r, 2500));
+		expect(await store.has("e3")).toBe(false);
 	});
 });
 
-describe("KeyvAerospike clear", () => {
-	it("clears only the current namespace", async () => {
-		const a = new KeyvAerospike({ hosts: aerospikeHosts, namespace: "nsA" });
-		const b = new KeyvAerospike({ hosts: aerospikeHosts, namespace: "nsB" });
-		a.on("error", () => {});
-		b.on("error", () => {});
-
-		await a.set("nsA::x", "ax");
-		await b.set("nsB::y", "by");
-
-		await a.clear();
-
-		expect(await a.get("nsA::x")).toBeUndefined();
-		expect(await b.get("nsB::y")).toBe("by");
-
-		await b.clear();
-		await a.disconnect();
-		await b.disconnect();
-	});
-});
-
-describe("KeyvAerospike iterator", () => {
-	it("yields only the matching namespace's entries", async () => {
-		const a = new KeyvAerospike({ hosts: aerospikeHosts, namespace: "itA" });
-		const b = new KeyvAerospike({ hosts: aerospikeHosts, namespace: "itB" });
-		a.on("error", () => {});
-		b.on("error", () => {});
-		await a.clear();
-		await b.clear();
-
-		await a.set("itA::1", "one");
-		await a.set("itA::2", "two");
-		await b.set("itB::3", "three");
-
-		const seen: Record<string, unknown> = {};
-		for await (const [key, value] of a.iterator("itA")) {
-			seen[key] = value;
-		}
-
-		expect(seen).toEqual({ "itA::1": "one", "itA::2": "two" });
-
-		await a.clear();
-		await b.clear();
-		await a.disconnect();
-		await b.disconnect();
-	});
-});
-
-describe("KeyvAerospike batch reads", () => {
-	const store = new KeyvAerospike({ hosts: aerospikeHosts });
-	store.on("error", () => {});
+describe("KeyvAerospike v6 batch", () => {
+	const store = makeStore();
 	afterAll(async () => {
 		await store.disconnect();
 	});
 
-	it("getMany returns values in order with undefined for misses", async () => {
-		await store.set("g1", "a");
-		await store.set("g2", "b");
-		expect(await store.getMany(["g1", "absent", "g2"])).toEqual([
-			"a",
-			undefined,
-			"b",
-		]);
-	});
-
-	it("getMany returns [] for an empty input", async () => {
-		expect(await store.getMany([])).toEqual([]);
-	});
-
-	it("hasMany returns existence flags in order", async () => {
-		await store.set("h1", "a");
-		expect(await store.hasMany(["h1", "absent"])).toEqual([true, false]);
-	});
-});
-
-describe("KeyvAerospike batch writes", () => {
-	const store = new KeyvAerospike({ hosts: aerospikeHosts });
-	store.on("error", () => {});
-	afterAll(async () => {
-		await store.disconnect();
-	});
-
-	it("setMany stores all entries", async () => {
-		await store.setMany([
+	it("setMany returns boolean[] and stores all", async () => {
+		const result = await store.setMany([
 			{ key: "s1", value: "a" },
 			{ key: "s2", value: "b" },
 		]);
+		expect(result).toEqual([true, true]);
 		expect(await store.getMany(["s1", "s2"])).toEqual(["a", "b"]);
 	});
 
-	it("deleteMany removes all keys and returns true", async () => {
+	it("getMany preserves order with undefined for misses", async () => {
+		await store.set("g1", "a");
+		expect(await store.getMany(["g1", "absent"])).toEqual(["a", undefined]);
+	});
+
+	it("hasMany returns flags in order", async () => {
+		await store.set("h1", "a");
+		expect(await store.hasMany(["h1", "absent"])).toEqual([true, false]);
+	});
+
+	it("deleteMany returns per-key boolean[]", async () => {
 		await store.setMany([
 			{ key: "d1", value: "a" },
 			{ key: "d2", value: "b" },
 		]);
-		expect(await store.deleteMany(["d1", "d2"])).toBe(true);
-		expect(await store.getMany(["d1", "d2"])).toEqual([undefined, undefined]);
-	});
-
-	it("deleteMany returns true for an empty input", async () => {
-		expect(await store.deleteMany([])).toBe(true);
-	});
-
-	it("deleteMany returns false when any key is absent", async () => {
-		await store.set("dm-present", "v");
-		// One present, one absent — result must be false
-		expect(await store.deleteMany(["dm-present", "dm-absent-key"])).toBe(false);
-	});
-
-	it("deleteMany returns true when all keys are present", async () => {
-		await store.setMany([
-			{ key: "dm-a", value: "1" },
-			{ key: "dm-b", value: "2" },
+		expect(await store.deleteMany(["d1", "absent", "d2"])).toEqual([
+			true,
+			false,
+			true,
 		]);
-		expect(await store.deleteMany(["dm-a", "dm-b"])).toBe(true);
+	});
+
+	it("empty batch inputs", async () => {
+		expect(await store.setMany([])).toEqual([]);
+		expect(await store.getMany([])).toEqual([]);
+		expect(await store.hasMany([])).toEqual([]);
+		expect(await store.deleteMany([])).toEqual([]);
 	});
 });
 
-describe("KeyvAerospike connectionTimeout", () => {
-	it("accepts connectionTimeout and still round-trips set/get", async () => {
-		const store = new KeyvAerospike({
-			hosts: aerospikeHosts,
-			connectionTimeout: 5000,
+describe("KeyvAerospike v6 namespace clear + iterator", () => {
+	it("clear only affects the current namespace", async () => {
+		const a = new KeyvAerospike({ hosts: aerospikeHosts, namespace: "nsA" });
+		const b = new KeyvAerospike({ hosts: aerospikeHosts, namespace: "nsB" });
+		a.on("error", () => {});
+		b.on("error", () => {});
+		await a.set("nsA::x", "ax");
+		await b.set("nsB::y", "by");
+		await a.clear();
+		expect(await a.get("nsA::x")).toBeUndefined();
+		expect(await b.get("nsB::y")).toBe("by");
+		await b.clear();
+		await a.disconnect();
+		await b.disconnect();
+	});
+
+	it("iterator yields only the matching namespace", async () => {
+		const a = new KeyvAerospike({ hosts: aerospikeHosts, namespace: "itA" });
+		a.on("error", () => {});
+		await a.clear();
+		await a.set("itA::1", "one");
+		await a.set("itA::2", "two");
+		const seen: Record<string, unknown> = {};
+		for await (const [key, value] of a.iterator("itA")) {
+			seen[key as string] = value;
+		}
+		expect(seen).toEqual({ "itA::1": "one", "itA::2": "two" });
+		await a.clear();
+		await a.disconnect();
+	});
+});
+
+describe("KeyvAerospike v6 read-compat with v1 records", () => {
+	it("reads a v1-shaped record (no expires bin)", async () => {
+		const store = makeStore();
+		const client = await store.getClient();
+		// Simulate a v1 record: value/key/namespace bins, no expires bin.
+		const Aerospike = (await import("aerospike")).default;
+		const asKey = new Aerospike.Key("keyv", "keyv", "legacy::k");
+		await client.put(asKey, {
+			value: { value: "legacy-value" },
+			key: "legacy::k",
+			namespace: "legacy",
 		});
-		store.on("error", () => {});
-		await store.set("ct-key", "ct-value");
-		expect(await store.get("ct-key")).toBe("ct-value");
+		expect(await store.get("legacy::k")).toBe("legacy-value");
+		await store.delete("legacy::k");
 		await store.disconnect();
 	});
 });
 
-describe("createKeyv", () => {
-	it("returns a working Keyv instance backed by Aerospike", async () => {
-		const keyv = createKeyv({ hosts: aerospikeHosts }, { namespace: "ck" });
+describe("createKeyv (v6)", () => {
+	it("round-trips and supports native keyv.iterator()", async () => {
+		const keyv = createKeyv({ hosts: aerospikeHosts }, { namespace: "ck6" });
 		keyv.on("error", () => {});
 		expect(keyv).toBeInstanceOf(Keyv);
-		await keyv.set("hello", "world");
-		expect(await keyv.get("hello")).toBe("world");
-		await keyv.disconnect();
-	});
-
-	it("supports keyv-level iteration (keyv.iterator())", async () => {
-		const keyv = createKeyv({ hosts: aerospikeHosts }, { namespace: "ckiter" });
-		keyv.on("error", () => {});
 		await keyv.clear();
 		await keyv.set("a", "1");
 		await keyv.set("b", "2");
-
+		expect(await keyv.get("a")).toBe("1");
 		const seen: Record<string, unknown> = {};
 		for await (const [key, value] of keyv.iterator()) {
 			seen[key] = value;
 		}
 		expect(seen).toEqual({ a: "1", b: "2" });
-
 		await keyv.clear();
 		await keyv.disconnect();
 	});

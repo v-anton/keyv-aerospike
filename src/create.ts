@@ -11,11 +11,5 @@ export function createKeyv(
 	if (options?.throwOnErrors) {
 		keyv.throwOnErrors = true;
 	}
-	// keyv core only auto-wires `keyv.iterator()` for adapters in its built-in
-	// dialect allowlist, which omits aerospike. Wire our store's iterator
-	// explicitly so iterating the Keyv instance returned by createKeyv works.
-	if (typeof store.iterator === "function") {
-		keyv.iterator = keyv.generateIterator(store.iterator.bind(store));
-	}
 	return keyv;
 }
