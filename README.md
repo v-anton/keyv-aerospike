@@ -1,14 +1,14 @@
-# @keyv/aerospike
+# keyv-aerospike
 
 > Aerospike storage adapter for [Keyv](https://github.com/jaredwray/keyv) — v1 / keyv-v5 line.
 
-[![npm version](https://img.shields.io/npm/v/@keyv/aerospike)](https://www.npmjs.com/package/@keyv/aerospike)
+[![npm version](https://img.shields.io/npm/v/keyv-aerospike)](https://www.npmjs.com/package/keyv-aerospike)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 ## Install
 
 ```bash
-npm install @keyv/aerospike aerospike keyv
+npm install keyv-aerospike aerospike keyv
 ```
 
 `aerospike` and `keyv` are peer dependencies. The `aerospike` native addon requires Node 18+ and the system `libyaml` library (`brew install libyaml` on macOS, `apt install libyaml-dev` on Debian/Ubuntu).
@@ -19,7 +19,7 @@ npm install @keyv/aerospike aerospike keyv
 
 ```ts
 import Keyv from 'keyv';
-import { KeyvAerospike } from '@keyv/aerospike';
+import { KeyvAerospike } from 'keyv-aerospike';
 
 const keyv = new Keyv(new KeyvAerospike('aerospike://127.0.0.1:3000'));
 
@@ -46,7 +46,7 @@ new KeyvAerospike('aerospike://user:pass@10.0.0.1:3000,10.0.0.2:3000?namespace=m
 ### Config-object form
 
 ```ts
-import { KeyvAerospike } from '@keyv/aerospike';
+import { KeyvAerospike } from 'keyv-aerospike';
 
 const store = new KeyvAerospike({
   hosts: [{ addr: '127.0.0.1', port: 3000 }],
@@ -62,7 +62,7 @@ const store = new KeyvAerospike({
 `createKeyv` builds the `Keyv` instance in one call:
 
 ```ts
-import { createKeyv } from '@keyv/aerospike';
+import { createKeyv } from 'keyv-aerospike';
 
 const keyv = createKeyv(
   { hosts: [{ addr: '127.0.0.1', port: 3000 }] },
