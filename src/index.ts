@@ -18,7 +18,6 @@ import { parseConnectionString } from "./utils.js";
 
 export type KeyvAerospikeOptions = {
 	namespace?: string;
-	keyPrefixSeparator?: string;
 	aerospikeNamespace?: string;
 	set?: string;
 	clearBatchSize?: number;
@@ -60,7 +59,6 @@ export class KeyvAerospike extends Hookified implements KeyvStorageAdapter {
 			const c = connect as ConfigOptions & KeyvAerospikeOptions;
 			const keyvKeys = [
 				"namespace",
-				"keyPrefixSeparator",
 				"aerospikeNamespace",
 				"set",
 				"clearBatchSize",
@@ -102,7 +100,6 @@ export class KeyvAerospike extends Hookified implements KeyvStorageAdapter {
 			} else if (connect) {
 				const {
 					namespace: _ns,
-					keyPrefixSeparator: _kps,
 					aerospikeNamespace: _an,
 					set: _s,
 					clearBatchSize: _cbs,
@@ -127,6 +124,9 @@ export class KeyvAerospike extends Hookified implements KeyvStorageAdapter {
 		return keyvStorageCapability(this);
 	}
 
+	// The namespace separator is fixed at ":" to match keyv v5's
+	// `${namespace}:${key}` storage-key format. Changing it would silently break
+	// read-compatibility with records written by keyv-aerospike v1.
 	private createKey(key: string): Key {
 		const storageKey = this.namespace ? `${this.namespace}:${key}` : key;
 		return new Aerospike.Key(this._asNamespace, this._set, storageKey);

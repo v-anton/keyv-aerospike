@@ -165,6 +165,24 @@ describe("KeyvAerospike v6 read-compat with v1 records", () => {
 		await store.delete("legacy::k");
 		await store.disconnect();
 	});
+
+	it("reads a v1-shaped namespaced record (namespace:key format)", async () => {
+		const store = new KeyvAerospike({ hosts: aerospikeHosts });
+		store.namespace = "legacy";
+		store.on("error", () => {});
+		const client = await store.getClient();
+		// keyv v5 stored namespaced records at `${namespace}:${key}` = "legacy:mykey".
+		const Aerospike = (await import("aerospike")).default;
+		const asKey = new Aerospike.Key("keyv", "keyv", "legacy:mykey");
+		await client.put(asKey, {
+			value: { value: "namespaced-value" },
+			key: "mykey",
+			namespace: "legacy",
+		});
+		expect(await store.get("mykey")).toBe("namespaced-value");
+		await store.delete("mykey");
+		await store.disconnect();
+	});
 });
 
 describe("createKeyv (v6)", () => {
