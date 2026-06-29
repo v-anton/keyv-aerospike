@@ -249,14 +249,9 @@ export class KeyvAerospike extends Hookified implements KeyvStorageAdapter {
 		if (entries.length === 0) {
 			return [];
 		}
-		try {
-			return await Promise.all(
-				entries.map((entry) => this.set(entry.key, entry.value, entry.expires)),
-			);
-		} catch (error) {
-			this.handleError(error);
-			return entries.map(() => false);
-		}
+		return Promise.all(
+			entries.map((entry) => this.set(entry.key, entry.value, entry.expires)),
+		);
 	}
 
 	public async delete(key: string): Promise<boolean> {
@@ -322,6 +317,7 @@ export class KeyvAerospike extends Hookified implements KeyvStorageAdapter {
 					return undefined;
 				}
 				const expires = result.record.bins.expires;
+				// Expired records are reported absent but not deleted here; Aerospike native TTL reclaims them (avoids an N-delete storm on bulk reads).
 				if (typeof expires === "number" && expires <= now) {
 					return undefined;
 				}
@@ -368,6 +364,7 @@ export class KeyvAerospike extends Hookified implements KeyvStorageAdapter {
 			for (const record of records) {
 				if (typeof record.bins.key !== "string") continue;
 				const expires = record.bins.expires;
+				// Skip expired records; native TTL reclaims them (no lazy delete on scan).
 				if (typeof expires === "number" && expires <= now) continue;
 				const value = (
 					record.bins.value as { value: Awaited<Value> } | null | undefined

@@ -102,7 +102,7 @@ Keyv v6 passes an absolute `expires` timestamp (milliseconds since epoch) to the
 
 - Stores the `expires` value in a dedicated Aerospike bin alongside the record.
 - Computes a relative TTL (`Math.ceil((expires - Date.now()) / 1000)`, minimum 1 s) and sets it as the Aerospike native record TTL so the server evicts the record automatically.
-- Enforces expiry on every read: if `expires <= Date.now()` the record is treated as missing and deleted lazily.
+- Enforces expiry on every read: if `expires <= Date.now()` the record is treated as missing. Single-key `get` also deletes it lazily; bulk and scan reads (`getMany`/`hasMany`/`iterator`) treat it as absent and rely on Aerospike's native TTL for reclamation.
 
 From a user's perspective nothing changes — you still call `keyv.set(key, value, ttlMs)` as before; Keyv v6 converts the TTL to an absolute timestamp internally.
 
