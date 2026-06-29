@@ -128,7 +128,8 @@ export class KeyvAerospike extends Hookified implements KeyvStorageAdapter {
 	}
 
 	private createKey(key: string): Key {
-		return new Aerospike.Key(this._asNamespace, this._set, key);
+		const storageKey = this.namespace ? `${this.namespace}:${key}` : key;
+		return new Aerospike.Key(this._asNamespace, this._set, storageKey);
 	}
 
 	private isNotFound(error: unknown): boolean {
