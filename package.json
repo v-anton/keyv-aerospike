@@ -1,6 +1,6 @@
 {
 	"name": "keyv-aerospike",
-	"version": "1.0.1",
+	"version": "1.1.0",
 	"description": "Aerospike storage adapter for Keyv",
 	"type": "module",
 	"license": "MIT",
@@ -40,9 +40,7 @@
 		},
 		"./package.json": "./package.json"
 	},
-	"files": [
-		"dist"
-	],
+	"files": ["dist"],
 	"engines": {
 		"node": ">=18"
 	},

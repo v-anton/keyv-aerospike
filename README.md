@@ -1,6 +1,8 @@
 # keyv-aerospike
 
 > Aerospike storage adapter for [Keyv](https://github.com/jaredwray/keyv) — v1 / keyv-v5 line.
+>
+> The 2.x line (`npm i keyv-aerospike@next`, branch `v2`) targets keyv 6's storage-adapter contract, which is pre-rc and still moving; 1.x is the line for keyv 5.
 
 [![npm version](https://img.shields.io/npm/v/keyv-aerospike)](https://www.npmjs.com/package/keyv-aerospike)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -97,7 +99,7 @@ store.on('error', (err) => console.error(err));
 ## TTL behavior
 
 - TTLs are passed as seconds to Aerospike (`Math.ceil(ttl / 1000)`), minimum 1 s.
-- TTL `0` or no TTL stores the record with `NEVER_EXPIRE`.
+- TTL `0` or no TTL stores the record with `NAMESPACE_DEFAULT`, so the namespace's `default-ttl` applies (`0` there = never expire).
 - Aerospike evicts expired records server-side; no application-side expiry is needed.
 
 ## Iteration

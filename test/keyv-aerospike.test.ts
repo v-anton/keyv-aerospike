@@ -1,3 +1,4 @@
+import Aerospike from "aerospike";
 import Keyv from "keyv";
 import { afterAll, describe, expect, it } from "vitest";
 import { KeyvAerospike, createKeyv } from "../src/index.js";
@@ -47,6 +48,15 @@ describe("KeyvAerospike core", () => {
 		await store.set("k5", "v", 1000);
 		await new Promise((r) => setTimeout(r, 2500));
 		expect(await store.get("k5")).toBeUndefined();
+	});
+
+	it("stores a key without a ttl under the namespace default-ttl", async () => {
+		// aerospike.conf declares default-ttl 30 on the keyv namespace.
+		await store.set("k6", "v");
+		const client = await store.getClient();
+		const record = await client.get(new Aerospike.Key("keyv", "keyv", "k6"));
+		expect(record.ttl).toBeGreaterThan(0);
+		expect(record.ttl).toBeLessThanOrEqual(30);
 	});
 });
 

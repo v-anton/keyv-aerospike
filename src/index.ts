@@ -204,7 +204,7 @@ export class KeyvAerospike extends Hookified implements KeyvStoreAdapter {
 			const ttlSeconds =
 				typeof ttl === "number" && ttl > 0
 					? Math.max(1, Math.ceil(ttl / 1000))
-					: Aerospike.ttl.NEVER_EXPIRE;
+					: Aerospike.ttl.NAMESPACE_DEFAULT;
 			await client.put(this.createKey(key), bins, { ttl: ttlSeconds });
 			return true;
 		} catch (error) {
